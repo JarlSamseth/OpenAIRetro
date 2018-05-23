@@ -7,7 +7,7 @@ import retro
 import pandas as pd
 MODEL_NAME="sonic_genesis_act1"
 WEIGHT_BACKUP_NAME = MODEL_NAME+"_weights.h5"
-BACKUP_FOLDER_NAME="sonic_genesis_act1_2018-05-23 19_27_13.029404"
+BACKUP_FOLDER_NAME="sonic_genesis_act1_2018-05-23 20_40_12.078695"
 class Trainer:
     def __init__(self):
         self.sample_batch_size = 32

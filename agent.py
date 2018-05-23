@@ -100,15 +100,18 @@ class BaseAgent:
             if done:
                 #targets[i][np.array(list(map(int, action))) == 0]=0
                 #targets[i][np.argmax(action)] = reward
-                target[0, np.array(action)==1] = reward
+                #target[0, np.array(action)==1] = reward
+                Q_values = np.array([reward])
             else:
                 #target = self.calculate_target(reward, next_state)
                 #targets[i][np.array(list(map(int, action))) == 0]=0
                 #targets[i][np.argmax(action)] = reward + self.gamma * np.max(self.predict(next_state)[0])
-                target[0, np.array(action)==1] = reward + self.gamma * np.argmax(self.predict(next_state)[0])
+                Q_values = reward + self.gamma * np.max(self.predict(next_state), axis=1)
+                #target[0, np.array(action)==1] = reward + self.gamma * np.argmax(self.predict(next_state)[0])
+
             i += 1
             state = np.reshape(state, (1,) + self.state_size)
-            self.train(state, target, verbose=0)
+            self.train(state, action*Q_values[:, None], verbose=0)
         if self.exploration_rate > self.exploration_min:
             self.exploration_rate *= self.exploration_decay
 
