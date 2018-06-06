@@ -1,13 +1,13 @@
-from agent import DeepQAgent, DeepQLstmAgent
+from agent import DeepQAgent, DeepConvQAgent
 import gym
 import numpy as np
 from retro_contest.local import make
 import datetime
 import retro
 import pandas as pd
-MODEL_NAME="sonic_genesis_act1"
-WEIGHT_BACKUP_NAME = MODEL_NAME+"_weights.h5"
-BACKUP_FOLDER_NAME="sonic_genesis_act1_2018-05-23 20_40_12.078695"
+MODEL_NAME="airstriker_weight"
+WEIGHT_BACKUP_NAME = MODEL_NAME+".h5"
+BACKUP_FOLDER_NAME="airstriker_weight_2018-05-24 17_43_27.761113"
 class Trainer:
     def __init__(self):
         self.sample_batch_size = 32
@@ -17,8 +17,9 @@ class Trainer:
         self.state_size = self.env.observation_space.shape
         self.action_size = self.env.action_space.n
         self.checkpoint = 100
-        self.agent = DeepQLstmAgent(self.state_size, self.action_size)
-        #self.agent.load_model_from_file(BACKUP_FOLDER_NAME, WEIGHT_BACKUP_NAME)
+        self.agent = DeepConvQAgent(self.state_size, self.action_size)
+        self.agent.load_model_from_file(BACKUP_FOLDER_NAME, WEIGHT_BACKUP_NAME)
+        #self.agent.load_model(BACKUP_FOLDER_NAME, WEIGHT_BACKUP_NAME)
         self.backup_folder = MODEL_NAME+"_"+datetime.datetime.now().__str__().replace(":","_")
         #self.rewards=pd.DataFrame()
 
@@ -32,7 +33,7 @@ class Trainer:
                 tot_reward = 0
 
                 while not done:
-                    #self.env.render()
+                    self.env.render()
                     action = self.agent.act(state)
                     next_state, reward, done, _ = self.env.step(action)
                     next_state = np.reshape(next_state, (1,)+self.state_size)

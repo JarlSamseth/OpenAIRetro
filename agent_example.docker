@@ -1,0 +1,8 @@
+FROM openai/retro-agent
+ADD agent.py .
+RUN apt-get update && apt install python3-pip -y
+RUN pip3 install --upgrade pip setuptools && pip install --upgrade pip
+RUN pip3 install keras
+RUN pip3 install --upgrade pip setuptools && pip install --upgrade pip
+RUN pip3 install tensorflow-gpu
+CMD ["python", "-u", "/root/compo/agent.py"]
