@@ -6,6 +6,8 @@ from collections import deque
 import numpy as np
 import pandas as pd
 from PIL import Image
+from keras import backend as K
+from keras.models import load_model
 
 from image_processor import ImageProcessor
 from memory import RingBuf
@@ -29,16 +31,33 @@ class DQN_AGENT:
         self.gamma = 0.99
         self.exploration_rate = 1.0
         self.exploration_min = 0.1
-        self.exploration_decay = 0.995
+        self.exploration_decay = 1. - 1 / 1000000
         self.final_exploration_frame = 1000000
-        self.memory = RingBuf(1000000)  # deque(maxlen=200000)
+        self.memory = RingBuf(50000)  # deque(maxlen=200000)
         self.model = None
         self.n_stacked_frames = 4
         self.metrics = pd.DataFrame({"qvalues": [0]})
         self.image_processor = ImageProcessor()
+        self.target_model = None
+        self.target_model_update_iteration = 10000
 
     def __build_model(self):
         return None
+
+    def copy_model(self, model):
+        """Returns a copy of a keras model."""
+        model.save('tmp_model')
+        return load_model('tmp_model', custom_objects={'huber_loss': self.huber_loss})
+
+    def huber_loss(self, a, b, in_keras=True):
+        error = a - b
+        quadratic_term = error * error / 2
+        linear_term = abs(error) - 1 / 2
+        use_linear_term = (abs(error) > 1.0)
+        if in_keras:
+            # Keras won't let us multiply floats by booleans, so we explicitly cast the booleans to floats
+            use_linear_term = K.cast(use_linear_term, 'float32')
+        return use_linear_term * linear_term + (1 - use_linear_term) * quadratic_term
 
     def preprocess(self, observation):
         assert observation.ndim == 3  # (height, width, channel)
@@ -50,15 +69,15 @@ class DQN_AGENT:
         return x_t1
 
     def load_model_from_file(self, backup_folder_name, model_name):
-        absolute_dir_path = script_dir + os.pathsep + backup_folder_name + os.pathsep + model_name
+        absolute_dir_path = script_dir + os.sep + backup_folder_name + os.sep + model_name
         log.info("Loading model and memory from dir=%s" % (absolute_dir_path))
 
-        if os.path.isfile(absolute_dir_path + os.pathsep + model_name):
+        if os.path.isfile(absolute_dir_path):
             self.model.load_weights(absolute_dir_path)
-            self.exploration_rate = self.exploration_min
+            self.exploration_rate = 0.5  # Have some exploration so it is not stuck on same place
+            log.info("Loading successful")
         else:
             log.warning("Could not find model on path")
-        log.info("Loading successful")
 
     def save_model(self, model_name):
         self.model.save(model_name)
@@ -93,31 +112,34 @@ class DQN_AGENT:
 
     def choose_best_action(self, state, iteration):
         # prepocessed_state = self.preprocess(state)
-        if (np.random.uniform() < self.get_epsilon_for_iteration(iteration)):
+        self.update_epsilon()
+        if (np.random.uniform() < self.exploration_rate):
             return np.random.random_integers(0, self.action_size - 1)
         state = self.reshape_state(state)
         q_values = self.model.predict(state).astype("int8")
         return np.argmax(q_values)
 
-    def get_epsilon_for_iteration(self, iteration):
-        if (iteration > self.final_exploration_frame):
-            return 0
-        return self.exploration_rate
+    def update_epsilon(self):
+        self.exploration_rate *= self.exploration_decay
 
-    def replay(self, sample_batch_size):
+    def replay(self, sample_batch_size, iteration):
 
         if len(self.memory) < sample_batch_size:
             return
 
+        if (iteration > self.target_model_update_iteration):
+            self.target_model_update_iteration += 10000
+            self.target_model = self.copy_model(self.model)
         sample_batch = self.get_sample_batch(sample_batch_size)
         states = np.zeros((sample_batch_size,) + (INPUT_SHAPE))
         targets = np.zeros((sample_batch_size, self.action_size))
         for (state, action, reward, next_state, done), i in zip(sample_batch, range(sample_batch_size)):
-
+            # state = self.reshape_state(state)
+            next_state = self.reshape_state(next_state)
             if done:
                 q_value = reward
             else:
-                next_targets = self.predict(next_state)
+                next_targets = self.target_model.predict(next_state)
                 q_value = reward + self.gamma * np.amax(next_targets)
 
             current_targets = self.predict(state)
@@ -126,11 +148,6 @@ class DQN_AGENT:
             targets[i] = current_targets
             states[i] = state
             self.append_metrics(q_value)
-
-        # self.train(states, targets)
-
-        if self.exploration_rate > self.exploration_min:
-            self.exploration_rate *= self.exploration_decay
 
     def get_sample_batch(self, sample_batch_size):
         return random.sample(self.memory, sample_batch_size)

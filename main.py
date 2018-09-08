@@ -15,7 +15,7 @@ from collections import deque
 
 MODEL_NAME = "breakout"
 WEIGHT_BACKUP_NAME = MODEL_NAME + ".h5"
-BACKUP_FOLDER_NAME = "BreakoutDeterministic_2018-09-08 12_26_11.559825"
+BACKUP_FOLDER_NAME = "BreakoutDeterministic_2018-09-08 13_21_34.239414"
 
 
 def main():
@@ -55,10 +55,10 @@ def main():
                 action = agent.choose_best_action(state, iteration)
                 next_state, reward, done, _ = env.step(action)
 
-                env.render()
-                clipped_reward = np.clip(reward, -1, 1)
+                # env.render()
+                # clipped_reward = np.clip(reward, -1., 1.)
                 next_state, stacked_frames = agent.stack_frames(stacked_frames, next_state, False)
-                agent.remember(state, action, clipped_reward, next_state, done)
+                agent.remember(state, action, reward, next_state, done)
                 state = next_state
                 tot_reward += reward
                 index += 1
@@ -67,7 +67,7 @@ def main():
             reward_merics = reward_merics.append(pd.DataFrame({'tot_reward': [tot_reward]}))
 
             if (iteration > replay_start_size):
-                agent.replay(sample_batch_size)
+                agent.replay(sample_batch_size, iteration)
 
             end = time.time()
             print(

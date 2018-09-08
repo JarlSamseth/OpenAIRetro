@@ -26,4 +26,5 @@ class DQN(DQN_AGENT):
         output = Dense(output_dim=self.action_size, activation='linear')(x)
         self.model = Model(inputs=input, outputs=output)
         adam = Adam(lr=self.learning_rate)
-        self.model.compile(optimizer=adam, loss='mse')
+        self.model.compile(optimizer=adam, loss=self.huber_loss)
+        self.target_model = self.copy_model(self.model)
