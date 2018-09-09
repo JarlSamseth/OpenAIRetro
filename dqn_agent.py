@@ -33,7 +33,7 @@ class DQN_AGENT:
         self.exploration_min = 0.1
         self.exploration_decay = 1. - 1 / 1000000
         self.final_exploration_frame = 1000000
-        self.memory = RingBuf(50000)  # deque(maxlen=200000)
+        self.memory = RingBuf(100000)  # deque(maxlen=200000)
         self.model = None
         self.n_stacked_frames = 4
         self.metrics = pd.DataFrame({"qvalues": [0]})
@@ -130,26 +130,22 @@ class DQN_AGENT:
         if len(self.memory) < sample_batch_size:
             return
 
-        if (iteration > self.target_model_update_iteration):
-            self.target_model_update_iteration += 10000
-            self.target_model = self.copy_model(self.model)
+        # if (iteration > self.target_model_update_iteration):
+        #     self.target_model_update_iteration += 10000
+        #     self.target_model = self.copy_model(self.model)
         sample_batch = self.get_sample_batch(sample_batch_size)
-        states = np.zeros((sample_batch_size,) + (INPUT_SHAPE))
-        targets = np.zeros((sample_batch_size, self.action_size))
         for (state, action, reward, next_state, done), i in zip(sample_batch, range(sample_batch_size)):
             # state = self.reshape_state(state)
             next_state = self.reshape_state(next_state)
             if done:
                 q_value = reward
             else:
-                next_targets = self.target_model.predict(next_state)
+                next_targets = self.model.predict(next_state)
                 q_value = reward + self.gamma * np.amax(next_targets)
 
             current_targets = self.predict(state)
             current_targets[0][action] = q_value
             self.train(state, current_targets)
-            targets[i] = current_targets
-            states[i] = state
             self.append_metrics(q_value)
 
     def get_sample_batch(self, sample_batch_size):
