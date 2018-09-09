@@ -39,7 +39,7 @@ class DQN_AGENT:
         self.metrics = pd.DataFrame({"qvalues": [0]})
         self.image_processor = ImageProcessor()
         self.target_model = None
-        self.target_model_update_iteration = 10000
+        self.target_model_update_iteration = 50000
 
     def __build_model(self):
         return None
@@ -130,10 +130,10 @@ class DQN_AGENT:
         if len(self.memory) < sample_batch_size:
             return
 
-        if (iteration > self.target_model_update_iteration):
-            print("Updating target model")
-            self.target_model_update_iteration += 10000
-            self.target_model = self.copy_model(self.model)
+        # if (iteration > self.target_model_update_iteration):
+        #     print("Updating target model")
+        #     self.target_model_update_iteration += 10000
+        #     self.target_model = self.copy_model(self.model)
         sample_batch = self.get_sample_batch(sample_batch_size)
         for (state, action, reward, next_state, done), i in zip(sample_batch, range(sample_batch_size)):
             # state = self.reshape_state(state)
@@ -141,10 +141,10 @@ class DQN_AGENT:
             if done:
                 q_value = reward
             else:
-                next_targets = self.target_model.predict(next_state)
+                next_targets = self.model.predict(next_state)
                 q_value = reward + self.gamma * np.amax(next_targets)
 
-            current_targets = self.target_model.predict(self.reshape_state(state))
+            current_targets = self.model.predict(self.reshape_state(state))
             current_targets[0][action] = q_value
             self.train(state, current_targets)
             self.append_metrics(q_value)
