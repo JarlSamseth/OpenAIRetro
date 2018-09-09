@@ -105,9 +105,9 @@ class DQN_AGENT:
 
     def save_model_and_memory(self, model_name, dir_name):
         log.info("Saving model")
-        if (not os.path.isdir(script_dir + "\\" + dir_name)):
-            os.mkdir(script_dir + "\\" + dir_name, 0o777)
-        self.model.save(script_dir + "/" + dir_name + "/" + model_name)
+        if (not os.path.isdir(script_dir + os.sep + dir_name)):
+            os.mkdir(script_dir + os.sep + dir_name, 0o777)
+        self.model.save(script_dir + os.sep + dir_name + os.sep + model_name)
         log.info("Saving successful")
 
     def choose_best_action(self, state, iteration):
