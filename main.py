@@ -15,7 +15,7 @@ from collections import deque
 
 MODEL_NAME = "breakout"
 WEIGHT_BACKUP_NAME = MODEL_NAME + ".h5"
-BACKUP_FOLDER_NAME = "BreakoutDeterministic_2018-09-08 13_21_34.239414"
+BACKUP_FOLDER_NAME = "BreakoutDeterministic_2018-09-08 19_46_06.788008"
 
 
 def main():
@@ -56,6 +56,7 @@ def main():
                 next_state, reward, done, _ = env.step(action)
 
                 # env.render()
+
                 # clipped_reward = np.clip(reward, -1., 1.)
                 next_state, stacked_frames = agent.stack_frames(stacked_frames, next_state, False)
                 agent.remember(state, action, reward, next_state, done)
@@ -85,10 +86,11 @@ def main():
         print(e)
         traceback.print_exc()
     finally:
+        pass
         # plot_metric_reward(metrics_reward)
-        plot_metric(agent.get_metrics())
-        plot_metric(reward_merics)
-        plt.show()
+        # plot_metric(agent.get_metrics())
+        # plot_metric(reward_merics)
+        # plt.show()
 
 
 def plot_metric(data):
