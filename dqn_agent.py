@@ -74,7 +74,7 @@ class DQN_AGENT:
 
         if os.path.isfile(absolute_dir_path):
             self.model.load_weights(absolute_dir_path)
-            self.exploration_rate = 0.5  # Have some exploration so it is not stuck on same place
+            self.exploration_rate = 0.1  # Have some exploration so it is not stuck on same place
             log.info("Loading successful")
         else:
             log.warning("Could not find model on path")
@@ -112,15 +112,18 @@ class DQN_AGENT:
 
     def choose_best_action(self, state, iteration):
         # prepocessed_state = self.preprocess(state)
-        self.update_epsilon()
+        self.update_epsilon(iteration)
         if (np.random.uniform() < self.exploration_rate):
             return np.random.random_integers(0, self.action_size - 1)
         state = self.reshape_state(state)
         q_values = self.model.predict(state).astype("int8")
         return np.argmax(q_values)
 
-    def update_epsilon(self):
-        self.exploration_rate *= self.exploration_decay
+    def update_epsilon(self, iteration):
+        if (iteration > self.final_exploration_frame or self.exploration_rate == self.exploration_min):
+            self.exploration_rate = self.exploration_min
+        else:
+            self.exploration_rate *= self.exploration_decay
 
     def replay(self, sample_batch_size, iteration):
 
