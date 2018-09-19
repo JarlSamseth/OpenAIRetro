@@ -1,16 +1,15 @@
 import logging as log
 import os
 import random
+from abc import abstractmethod
 from collections import deque
 
 import numpy as np
-import pandas as pd
+import tensorflow as tf
 from PIL import Image
 from keras import backend as K
 from keras.models import load_model
-
-from image_processor import ImageProcessor
-from memory import RingBuf
+from keras.utils import to_categorical
 
 log.basicConfig(level=log.INFO)
 
@@ -25,26 +24,44 @@ script_dir = os.path.dirname(__file__)  # <-- absolute dir the script is in
 class DQN_AGENT:
 
     def __init__(self, state_size, action_size):
+        # environment settings
         self.state_size = state_size
         self.action_size = action_size
-        self.learning_rate = 0.00025
+        self.input_shape = (84, 84, 4)
+        self.batch_size = 32
+
+        self.learning_rate = 0.001
         self.gamma = 0.99
-        self.exploration_rate = 1.0
-        self.exploration_min = 0.1
-        self.exploration_decay = 1. - 1 / 1000000
+
+        self.avg_q_max, self.avg_loss = 0, 0
+
+        # parameters about epsilon
+        self.exploration_rate_max, self.exploration_min = 1.0, 0.1
+        self.exploration_rate = self.exploration_rate_max
+
+        self.exploration_decay = 1. - 1 / 100000
         self.final_exploration_frame = 1000000
-        self.memory = RingBuf(100000)  # deque(maxlen=200000)
-        self.model = None
+        self.memory = deque(maxlen=400000)
         self.n_stacked_frames = 4
-        self.metrics = pd.DataFrame({"qvalues": [0]})
-        self.image_processor = ImageProcessor()
+
+        # model
+        self.model = None
         self.target_model = None
         self.target_model_update_iteration = 50000
 
+        self.sess = tf.InteractiveSession()
+        K.set_session(self.sess)
+        self.summary_placeholders, self.update_ops, self.summary_op = \
+            self.setup_summary()
+        self.summary_writer = tf.summary.FileWriter(
+            'summary/breakout_dqn', self.sess.graph)
+        self.sess.run(tf.global_variables_initializer())
+
+    @abstractmethod
     def __build_model(self):
         return None
 
-    def copy_model(self, model):
+    def clone_model(self, model):
         """Returns a copy of a keras model."""
         model.save('tmp_model')
         return load_model('tmp_model', custom_objects={'huber_loss': self.huber_loss})
@@ -68,89 +85,87 @@ class DQN_AGENT:
         x_t1 = processed_observation.astype('uint8')
         return x_t1
 
-    def load_model_from_file(self, backup_folder_name, model_name):
-        absolute_dir_path = script_dir + os.sep + backup_folder_name + os.sep + model_name
-        log.info("Loading model and memory from dir=%s" % (absolute_dir_path))
-
-        if os.path.isfile(absolute_dir_path):
-            self.model.load_weights(absolute_dir_path)
-            self.exploration_rate = 0.1  # Have some exploration so it is not stuck on same place
+    def load_model(self, directory, model_name):
+        absolute_path = script_dir + os.sep + directory
+        log.info("Loading model from directory=%s" % (absolute_path))
+        model_path = absolute_path + os.sep + model_name
+        if os.path.isfile(model_path):
+            self.model.load_weights(model_path)
+            # self.exploration_rate = 0.1  # Have some exploration so it is not stuck on same place
             log.info("Loading successful")
         else:
-            log.warning("Could not find model on path")
+            log.warning("Could not find model on path=" + model_path)
 
-    def save_model(self, model_name):
-        self.model.save(model_name)
+    def save_model(self, directory, model_name):
+        log.info("Saving model")
+        absolute_path = script_dir + os.sep + directory
+        if (not os.path.isdir(absolute_path)):
+            os.mkdir(absolute_path, 0o777)
+        self.model.save(absolute_path + os.sep + model_name)
+        log.info("Saving successful")
 
     def train(self, state, target):
-        state = self.reshape_state(state)
-        self.model.fit(state, target, epochs=1, verbose=0)
+        return self.model.fit(state, target, epochs=1, verbose=0)
 
     def predict(self, state):
         state = self.reshape_state(state)
         return self.model.predict(state)
 
-    def calculate_qvalue(self, reward, next_state):
-        return reward + self.gamma * np.amax(self.predict(next_state))
-
     def remember(self, state, action, reward, next_state, done):
         # prepocessed_state = self.preprocess(state)
         self.memory.append((state, action, reward, next_state, done))
 
-    def append_metrics(self, qvalue):
-        self.metrics = self.metrics.append(pd.DataFrame({'qvalues': [qvalue]}))
-
-    def get_metrics(self):
-        return self.metrics
-
-    def save_model_and_memory(self, model_name, dir_name):
-        log.info("Saving model")
-        if (not os.path.isdir(script_dir + os.sep + dir_name)):
-            os.mkdir(script_dir + os.sep + dir_name, 0o777)
-        self.model.save(script_dir + os.sep + dir_name + os.sep + model_name)
-        log.info("Saving successful")
-
-    def choose_best_action(self, state, iteration):
-        # prepocessed_state = self.preprocess(state)
-        self.update_epsilon(iteration)
+    def choose_best_action(self, state):
         if (np.random.uniform() < self.exploration_rate):
             return np.random.random_integers(0, self.action_size - 1)
         state = self.reshape_state(state)
-        q_values = self.model.predict(state).astype("int8")
+        q_values = self.model.predict([state, np.ones((1, self.action_size))]).astype("int8")
         return np.argmax(q_values)
 
     def update_epsilon(self, iteration):
-        if (iteration > self.final_exploration_frame or self.exploration_rate == self.exploration_min):
-            self.exploration_rate = self.exploration_min
-        else:
-            self.exploration_rate *= self.exploration_decay
+        a = (self.exploration_rate_max - self.exploration_min) / self.final_exploration_frame
+        b = self.exploration_rate_max
+        self.exploration_rate = np.max([b - a * iteration, self.exploration_min])
 
-    def replay(self, sample_batch_size, iteration):
+    def train_replay(self, sample_batch_size, iteration):
 
         if len(self.memory) < sample_batch_size:
             return
 
-        # if (iteration > self.target_model_update_iteration):
-        #     print("Updating target model")
-        #     self.target_model_update_iteration += 10000
-        #     self.target_model = self.copy_model(self.model)
-        sample_batch = self.get_sample_batch(sample_batch_size)
-        for (state, action, reward, next_state, done), i in zip(sample_batch, range(sample_batch_size)):
-            # state = self.reshape_state(state)
-            next_state = self.reshape_state(next_state)
-            if done:
-                q_value = reward
+        self.update_epsilon(iteration)
+
+        if (iteration % self.target_model_update_iteration is 0):
+            self.target_model = self.clone_model(self.model)
+
+        history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
+        next_history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
+        target = np.zeros((self.batch_size, self.action_size))
+        action, reward, done = np.zeros((self.batch_size), dtype="uint8"), np.zeros((self.batch_size)), np.zeros(
+            (self.batch_size))
+
+        sample_batch = self.get_sample_batch()
+
+        for i in range(self.batch_size):
+            history[i] = self.reshape_state(sample_batch[i][0])
+            next_history[i] = self.reshape_state(sample_batch[i][3])
+            action[i] = sample_batch[i][1]
+            reward[i] = sample_batch[i][2]
+            done[i] = sample_batch[i][4]
+
+        next_targets = self.model.predict([next_history, np.ones((self.batch_size, self.action_size))])
+
+        for i in range(self.batch_size):
+            if done[i]:
+                target[i][action[i]] = reward[i]
             else:
-                next_targets = self.model.predict(next_state)
-                q_value = reward + self.gamma * np.amax(next_targets)
+                target[i][action[i]] = reward[i] + self.gamma * np.amax(next_targets[i])
 
-            current_targets = self.model.predict(self.reshape_state(state))
-            current_targets[0][action] = q_value
-            self.train(state, current_targets)
-            self.append_metrics(q_value)
+        result = self.train([history, to_categorical(action, num_classes=self.action_size)], target)
+        loss = result.history["loss"][0]
+        self.avg_loss += loss
 
-    def get_sample_batch(self, sample_batch_size):
-        return random.sample(self.memory, sample_batch_size)
+    def get_sample_batch(self):
+        return random.sample(self.memory, self.batch_size)
 
     def reshape_state(self, state):
         return np.reshape(state, (1,) + state.shape)
@@ -181,3 +196,25 @@ class DQN_AGENT:
             stacked_state = np.stack(stacked_frames, axis=2)
 
         return stacked_state, stacked_frames
+
+    def setup_summary(self):
+        episode_total_reward = tf.Variable(0.)
+        episode_avg_max_q = tf.Variable(0.)
+        episode_step = tf.Variable(0.)
+        episode_avg_loss = tf.Variable(0.)
+        episode_avg_duration = tf.Variable(0.)
+
+        tf.summary.scalar('Total Reward/Episode', episode_total_reward)
+        tf.summary.scalar('Average Max Q/Episode', episode_avg_max_q)
+        tf.summary.scalar('Steps/Episode', episode_step)
+        tf.summary.scalar('Average Loss/Episode', episode_avg_loss)
+        tf.summary.scalar('Avg duration/Episode in seconds', episode_avg_duration)
+
+        summary_vars = [episode_total_reward, episode_avg_max_q,
+                        episode_step, episode_avg_loss, episode_avg_duration]
+        summary_placeholders = [tf.placeholder(tf.float32) for _ in
+                                range(len(summary_vars))]
+        update_ops = [summary_vars[i].assign(summary_placeholders[i]) for i in
+                      range(len(summary_vars))]
+        summary_op = tf.summary.merge_all()
+        return summary_placeholders, update_ops, summary_op
