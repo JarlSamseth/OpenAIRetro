@@ -47,7 +47,7 @@ class DQN_AGENT:
         # model
         self.model = None
         self.target_model = None
-        self.target_model_update_iteration = 50000
+        self.target_model_update_iteration = 1000
 
         self.sess = tf.InteractiveSession()
         K.set_session(self.sess)
@@ -83,7 +83,7 @@ class DQN_AGENT:
         processed_observation = np.array(img)
         assert processed_observation.shape == INPUT_SHAPE[0:2]
         x_t1 = processed_observation.astype('uint8')
-        return x_t1
+        return self.reshape_state(x_t1)
 
     def load_model(self, directory, model_name):
         absolute_path = script_dir + os.sep + directory
@@ -91,7 +91,7 @@ class DQN_AGENT:
         model_path = absolute_path + os.sep + model_name
         if os.path.isfile(model_path):
             self.model.load_weights(model_path)
-            # self.exploration_rate = 0.1  # Have some exploration so it is not stuck on same place
+            self.exploration_rate = 0.1  # Have some exploration so it is not stuck on same place
             log.info("Loading successful")
         else:
             log.warning("Could not find model on path=" + model_path)
@@ -108,7 +108,6 @@ class DQN_AGENT:
         return self.model.fit(state, target, epochs=1, verbose=0)
 
     def predict(self, state):
-        state = self.reshape_state(state)
         return self.model.predict(state)
 
     def remember(self, state, action, reward, next_state, done):
@@ -118,7 +117,6 @@ class DQN_AGENT:
     def choose_best_action(self, state):
         if (np.random.uniform() < self.exploration_rate):
             return np.random.random_integers(0, self.action_size - 1)
-        state = self.reshape_state(state)
         q_values = self.model.predict([state, np.ones((1, self.action_size))]).astype("int8")
         return np.argmax(q_values)
 
@@ -136,6 +134,7 @@ class DQN_AGENT:
 
         if (iteration % self.target_model_update_iteration is 0):
             self.target_model = self.clone_model(self.model)
+            print("update")
 
         history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
         next_history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
@@ -146,13 +145,13 @@ class DQN_AGENT:
         sample_batch = self.get_sample_batch()
 
         for i in range(self.batch_size):
-            history[i] = self.reshape_state(sample_batch[i][0])
-            next_history[i] = self.reshape_state(sample_batch[i][3])
+            history[i] = sample_batch[i][0]
+            next_history[i] = sample_batch[i][3]
             action[i] = sample_batch[i][1]
             reward[i] = sample_batch[i][2]
             done[i] = sample_batch[i][4]
 
-        next_targets = self.model.predict([next_history, np.ones((self.batch_size, self.action_size))])
+        next_targets = self.target_model.predict([next_history, np.ones((self.batch_size, self.action_size))])
 
         for i in range(self.batch_size):
             if done[i]:
@@ -168,7 +167,9 @@ class DQN_AGENT:
         return random.sample(self.memory, self.batch_size)
 
     def reshape_state(self, state):
-        return np.reshape(state, (1,) + state.shape)
+        if (not list(state.shape).__len__() == list(self.input_shape).__len__()):
+            return np.reshape(state, (1,) + state.shape)
+        return state
 
     def stack_frames(self, stacked_frames, state, is_new_episode):
         # Preprocess frame
@@ -186,14 +187,14 @@ class DQN_AGENT:
             stacked_frames.append(frame)
 
             # Stack the frames
-            stacked_state = np.stack(stacked_frames, axis=2)
+            stacked_state = np.stack(stacked_frames, axis=3)
 
         else:
             # Append frame to deque, automatically removes the oldest frame
             stacked_frames.append(frame)
 
             # Build the stacked state (first dimension specifies different frames)
-            stacked_state = np.stack(stacked_frames, axis=2)
+            stacked_state = np.stack(stacked_frames, axis=3)
 
         return stacked_state, stacked_frames
 
