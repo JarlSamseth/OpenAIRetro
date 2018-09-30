@@ -5,10 +5,9 @@ from abc import abstractmethod
 from collections import deque
 
 import numpy as np
-import tensorflow as tf
 from PIL import Image
 from keras import backend as K
-from keras.models import load_model
+from keras.models import clone_model
 from keras.utils import to_categorical
 
 log.basicConfig(level=log.INFO)
@@ -41,7 +40,7 @@ class DQN_AGENT:
 
         self.exploration_decay = 1. - 1 / 100000
         self.final_exploration_frame = 1000000
-        self.memory = deque(maxlen=400000)
+        self.memory = deque(maxlen=50000)
         self.n_stacked_frames = 4
 
         # model
@@ -49,22 +48,15 @@ class DQN_AGENT:
         self.target_model = None
         self.target_model_update_iteration = 1000
 
-        self.sess = tf.InteractiveSession()
-        K.set_session(self.sess)
-        self.summary_placeholders, self.update_ops, self.summary_op = \
-            self.setup_summary()
-        self.summary_writer = tf.summary.FileWriter(
-            'summary/breakout_dqn', self.sess.graph)
-        self.sess.run(tf.global_variables_initializer())
-
     @abstractmethod
     def __build_model(self):
         return None
 
-    def clone_model(self, model):
+    def clone_model(self):
         """Returns a copy of a keras model."""
-        model.save('tmp_model')
-        return load_model('tmp_model', custom_objects={'huber_loss': self.huber_loss})
+        temp_model = clone_model(self.model)
+        temp_model.set_weights(self.model.get_weights())
+        return temp_model
 
     def huber_loss(self, a, b, in_keras=True):
         error = a - b
@@ -85,16 +77,17 @@ class DQN_AGENT:
         x_t1 = processed_observation.astype('uint8')
         return self.reshape_state(x_t1)
 
-    def load_model(self, directory, model_name):
-        absolute_path = script_dir + os.sep + directory
+    def load_model(self, relative_path):
+        absolute_path = script_dir + os.sep + relative_path
         log.info("Loading model from directory=%s" % (absolute_path))
-        model_path = absolute_path + os.sep + model_name
-        if os.path.isfile(model_path):
-            self.model.load_weights(model_path)
-            self.exploration_rate = 0.1  # Have some exploration so it is not stuck on same place
+        if os.path.isfile(absolute_path):
+            self.model.load_weights(absolute_path)
+            self.target_model.load_weights(absolute_path)
+            self.exploration_rate = 0.1
+            self.final_exploration_frame = 1
             log.info("Loading successful")
         else:
-            log.warning("Could not find model on path=" + model_path)
+            log.warning("Could not find model on path=" + absolute_path + ". Continuing without loading existing model")
 
     def save_model(self, directory, model_name):
         log.info("Saving model")
@@ -114,7 +107,7 @@ class DQN_AGENT:
         # prepocessed_state = self.preprocess(state)
         self.memory.append((state, action, reward, next_state, done))
 
-    def choose_best_action(self, state):
+    def act(self, state):
         if (np.random.uniform() < self.exploration_rate):
             return np.random.random_integers(0, self.action_size - 1)
         q_values = self.model.predict([state, np.ones((1, self.action_size))]).astype("int8")
@@ -125,22 +118,12 @@ class DQN_AGENT:
         b = self.exploration_rate_max
         self.exploration_rate = np.max([b - a * iteration, self.exploration_min])
 
-    def train_replay(self, sample_batch_size, iteration):
-
-        if len(self.memory) < sample_batch_size:
-            return
-
-        self.update_epsilon(iteration)
-
-        if (iteration % self.target_model_update_iteration is 0):
-            self.target_model = self.clone_model(self.model)
-            print("update")
-
+    def train_data(self):
         history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
         next_history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
-        target = np.zeros((self.batch_size, self.action_size))
-        action, reward, done = np.zeros((self.batch_size), dtype="uint8"), np.zeros((self.batch_size)), np.zeros(
-            (self.batch_size))
+        action = np.zeros((self.batch_size,), dtype="uint8")
+        reward = np.zeros((self.batch_size,), dtype="uint8")
+        done = np.zeros((self.batch_size,), dtype="bool")
 
         sample_batch = self.get_sample_batch()
 
@@ -151,6 +134,19 @@ class DQN_AGENT:
             reward[i] = sample_batch[i][2]
             done[i] = sample_batch[i][4]
 
+        return history, next_history, action, reward, done
+
+    def train_replay(self, iteration):
+
+        if len(self.memory) < self.batch_size:
+            return
+
+        if (iteration % self.target_model_update_iteration is 0):
+            self.target_model = self.clone_model()
+
+        target = np.zeros((self.batch_size, self.action_size))
+
+        history, next_history, action, reward, done = self.train_data()
         next_targets = self.target_model.predict([next_history, np.ones((self.batch_size, self.action_size))])
 
         for i in range(self.batch_size):
@@ -163,13 +159,13 @@ class DQN_AGENT:
         loss = result.history["loss"][0]
         self.avg_loss += loss
 
+        self.update_epsilon(iteration)
+
     def get_sample_batch(self):
         return random.sample(self.memory, self.batch_size)
 
     def reshape_state(self, state):
-        if (not list(state.shape).__len__() == list(self.input_shape).__len__()):
-            return np.reshape(state, (1,) + state.shape)
-        return state
+        return np.reshape(state, (1,) + state.shape)
 
     def stack_frames(self, stacked_frames, state, is_new_episode):
         # Preprocess frame
@@ -197,25 +193,3 @@ class DQN_AGENT:
             stacked_state = np.stack(stacked_frames, axis=3)
 
         return stacked_state, stacked_frames
-
-    def setup_summary(self):
-        episode_total_reward = tf.Variable(0.)
-        episode_avg_max_q = tf.Variable(0.)
-        episode_step = tf.Variable(0.)
-        episode_avg_loss = tf.Variable(0.)
-        episode_avg_duration = tf.Variable(0.)
-
-        tf.summary.scalar('Total Reward/Episode', episode_total_reward)
-        tf.summary.scalar('Average Max Q/Episode', episode_avg_max_q)
-        tf.summary.scalar('Steps/Episode', episode_step)
-        tf.summary.scalar('Average Loss/Episode', episode_avg_loss)
-        tf.summary.scalar('Avg duration/Episode in seconds', episode_avg_duration)
-
-        summary_vars = [episode_total_reward, episode_avg_max_q,
-                        episode_step, episode_avg_loss, episode_avg_duration]
-        summary_placeholders = [tf.placeholder(tf.float32) for _ in
-                                range(len(summary_vars))]
-        update_ops = [summary_vars[i].assign(summary_placeholders[i]) for i in
-                      range(len(summary_vars))]
-        summary_op = tf.summary.merge_all()
-        return summary_placeholders, update_ops, summary_op

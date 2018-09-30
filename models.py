@@ -30,7 +30,7 @@ class DQN(DQN_AGENT):
         self.model = Model(inputs=input, outputs=output)
         adam = Adam()
         self.model.compile(optimizer=adam, loss=self.huber_loss)
-        self.target_model = self.clone_model(self.model)
+        self.target_model = self.clone_model()
         print(self.model.summary())
 
 
@@ -55,7 +55,7 @@ class DQN_MASK(DQN_AGENT):
         self.model = Model(input=[input, actions_input], output=filtered_output)
         optimizer = Adam(lr=0.00025)
         self.model.compile(optimizer=optimizer, loss=self.huber_loss)
-        self.target_model = self.clone_model(self.model)
+        self.target_model = self.clone_model()
         print(self.model.summary())
 
 
