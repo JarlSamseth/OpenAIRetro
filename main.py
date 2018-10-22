@@ -57,9 +57,10 @@ def main(args):
                     env.render()
 
                 # clipped_reward = np.clip(reward, -1., 1.)
-                if (info["ale.lives"] < lives):
-                    lives = info["ale.lives"]
-                    reward = -1
+                # if (info["ale.lives"] < lives):
+                #     lives = info["ale.lives"]
+                #     reward = -1
+                
                 next_state, stacked_frames = agent.stack_frames(stacked_frames, next_state, False)
                 agent.remember(state, action, reward, next_state, done)
                 state = next_state
