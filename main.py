@@ -25,7 +25,7 @@ def main(args):
     state_size = env.observation_space.shape
     action_size = env.action_space.n
 
-    agent = DQN_MASK(state_size, action_size, INPUT_SHAPE)
+    agent = DQN_MASK(state_size, action_size, INPUT_SHAPE, int(args.memory_size))
 
     if (args.load_model is not False):
         agent.load_model(args.load_model)
@@ -48,7 +48,6 @@ def main(args):
             step = 0
 
             state, stacked_frames = agent.stack_frames(stacked_frames, state, True)
-            lives = 5
             while not done:
                 action = agent.act(state)
                 next_state, reward, done, info = env.step(action)
@@ -83,8 +82,8 @@ def main(args):
                                         "Avg_duration_seconds/Episode": end - start}, episode)
 
             print(
-                "episode: %s score: %.2f memory length: %.0f epsilon: %.3f global_step:%.0f average_q:%.2f average loss:%.5f time: %.2f"
-                % (episode, tot_reward, len(agent.memory), agent.exploration_rate, global_step,
+                "episode: %s score: %.2f memory length: %.0f/%.0f epsilon: %.3f global_step:%.0f average_q:%.2f average loss:%.5f time: %.2f"
+                % (episode, tot_reward, len(agent.memory), agent.memory.maxlen, agent.exploration_rate, global_step,
                    agent.avg_q_max / float(step), agent.avg_loss / float(step), end - start))
 
             if (episode % checkpoint == 0 and episode is not 0):
@@ -113,4 +112,6 @@ if __name__ == '__main__':
                         help='Set this to true if you want to load an saved model')
     parser.add_argument('--render', type=str2bool, nargs="?", const=True, default=False,
                         help='Render the game')
+    parser.add_argument('--memory_size', default=50000,
+                        help='Maximum memory size')
     main(parser.parse_args())

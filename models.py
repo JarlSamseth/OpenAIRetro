@@ -36,8 +36,8 @@ class DQN(DQN_AGENT):
 
 class DQN_MASK(DQN_AGENT):
 
-    def __init__(self, state_size, action_size, input_shape):
-        DQN_AGENT.__init__(self, state_size, action_size)
+    def __init__(self, state_size, action_size, input_shape, memory_size):
+        DQN_AGENT.__init__(self, state_size, action_size, memory_size)
 
         self.input_shape = input_shape
         self.__build_model()
