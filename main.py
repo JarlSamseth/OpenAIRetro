@@ -17,7 +17,7 @@ import argparse
 
 def main(args):
     episodes = 50000
-    checkpoint = 1000
+    checkpoint = 500
     replay_start_size = 50000
 
     env = gym.make('BreakoutDeterministic-v4')

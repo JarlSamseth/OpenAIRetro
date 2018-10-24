@@ -7,9 +7,10 @@ from collections import deque
 import numpy as np
 from PIL import Image
 from keras import backend as K
-from keras.models import clone_model
+from keras.models import clone_model, load_model
+from keras.optimizers import Adam
 from keras.utils import to_categorical
-
+from matplotlib import pyplot as plt
 log.basicConfig(level=log.INFO)
 
 MODEL_NAME = "breakout"
@@ -46,7 +47,7 @@ class DQN_AGENT:
         # model
         self.model = None
         self.target_model = None
-        self.target_model_update_iteration = 1000
+        self.target_model_update_iteration = 10000
 
     @abstractmethod
     def __build_model(self):
@@ -81,8 +82,8 @@ class DQN_AGENT:
         absolute_path = script_dir + os.sep + relative_path
         log.info("Loading model from directory=%s" % (absolute_path))
         if os.path.isfile(absolute_path):
-            self.model.load_weights(absolute_path)
-            self.target_model.load_weights(absolute_path)
+            self.model=load_model(absolute_path, custom_objects={"huber_loss": self.huber_loss})
+            self.target_model=self.clone_model()
             self.exploration_rate = 0.1
             self.final_exploration_frame = 1
             log.info("Loading successful")

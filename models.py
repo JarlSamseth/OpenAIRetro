@@ -53,7 +53,7 @@ class DQN_MASK(DQN_AGENT):
         output = Dense(output_dim=self.action_size, activation='linear')(x)
         filtered_output = merge([output, actions_input], mode='mul')
         self.model = Model(input=[input, actions_input], output=filtered_output)
-        optimizer = Adam(lr=0.00025)
+        optimizer = Adam()
         self.model.compile(optimizer=optimizer, loss=self.huber_loss)
         self.target_model = self.clone_model()
         print(self.model.summary())
