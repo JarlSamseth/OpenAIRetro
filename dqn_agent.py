@@ -8,9 +8,10 @@ import numpy as np
 from PIL import Image
 from keras import backend as K
 from keras.models import clone_model, load_model
-from keras.optimizers import Adam
 from keras.utils import to_categorical
-from matplotlib import pyplot as plt
+from skimage.color import rgb2gray
+from skimage.transform import resize
+
 log.basicConfig(level=log.INFO)
 
 MODEL_NAME = "breakout"
@@ -70,6 +71,11 @@ class DQN_AGENT:
             use_linear_term = K.cast(use_linear_term, 'float32')
         return use_linear_term * linear_term + (1 - use_linear_term) * quadratic_term
 
+    def preprocess_v2(self, observation):
+        processed_observe = np.uint8(
+            resize(rgb2gray(observation), (84, 84), mode='constant') * 255)
+        return self.reshape_state(processed_observe)
+
     def preprocess(self, observation):
         assert observation.ndim == 3  # (height, width, channel)
         img = Image.fromarray(observation)
@@ -86,7 +92,7 @@ class DQN_AGENT:
             del self.model
             self.model=load_model(absolute_path, custom_objects={"huber_loss": self.huber_loss})
             self.target_model=self.clone_model()
-            self.exploration_rate = 0.1
+            self.exploration_rate = 0.001
             self.final_exploration_frame = 1
             log.info("Loading successful")
         else:
@@ -113,7 +119,7 @@ class DQN_AGENT:
     def act(self, state, global_step):
         if (np.random.uniform() < self.exploration_rate or global_step<=self.replay_start_step):
             return np.random.random_integers(0, self.action_size - 1)
-        q_values = self.model.predict([state, np.ones((1, self.action_size))]).astype("int8")
+        q_values = self.model.predict([state, np.ones(self.action_size).reshape(1, self.action_size)])
         return np.argmax(q_values)
 
     def update_epsilon(self, iteration):
@@ -154,12 +160,12 @@ class DQN_AGENT:
 
         for i in range(self.batch_size):
             if dead[i]:
-                target[i][action[i]] = -1
+                target[i][action[i]] = reward[i]
             else:
                 target[i][action[i]] = reward[i] + self.gamma * np.amax(next_targets[i])
 
         action_one_hot=to_categorical(action, num_classes=self.action_size)
-        target_one_hot=action_one_hot*target[:, None]
+        target_one_hot = action_one_hot * target
 
         result = self.train([history, action_one_hot], target_one_hot)
         loss = result.history["loss"][0]
@@ -176,24 +182,22 @@ class DQN_AGENT:
     def stack_frames(self, stacked_frames, state, is_new_episode):
         # Preprocess frame
         frame = self.preprocess(state)
-
         if is_new_episode:
             # Clear our stacked_frames
-            stacked_frames = deque([np.zeros((INPUT_SHAPE[0:2]), dtype=np.int) for i in range(INPUT_SHAPE[-1])],
-                                   maxlen=4)
+            stacked_frames = deque(maxlen=4)
 
             # Because we're in a new episode, copy the same frame 4x
-            stacked_frames.append(frame)
-            stacked_frames.append(frame)
-            stacked_frames.append(frame)
-            stacked_frames.append(frame)
+            stacked_frames.appendleft(frame)
+            stacked_frames.appendleft(frame)
+            stacked_frames.appendleft(frame)
+            stacked_frames.appendleft(frame)
 
             # Stack the frames
             stacked_state = np.stack(stacked_frames, axis=3)
 
         else:
             # Append frame to deque, automatically removes the oldest frame
-            stacked_frames.append(frame)
+            stacked_frames.appendleft(frame)
 
             # Build the stacked state (first dimension specifies different frames)
             stacked_state = np.stack(stacked_frames, axis=3)

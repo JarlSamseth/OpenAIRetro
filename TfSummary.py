@@ -4,8 +4,8 @@ from keras import backend as K
 
 class TfSummary:
     def __init__(self, dir_name, summary_names) -> None:
-        self.sess = tf.InteractiveSession()
-        K.set_session(self.sess)
+        self.sess = K.get_session()
+
 
         self.summary_placeholders, self.update_ops, self.summary_op = \
             self.__setup_summary(summary_names)

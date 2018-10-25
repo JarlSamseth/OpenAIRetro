@@ -2,7 +2,7 @@ from collections import deque
 
 import numpy as np
 from keras.layers import Conv2D, Flatten, Multiply
-from keras.layers import Input, Dense, Lambda, merge
+from keras.layers import Input, Dense, Lambda
 from keras.models import Model, Sequential
 from keras.optimizers import Adam, RMSprop
 
@@ -37,7 +37,7 @@ class DQN(DQN_AGENT):
 class DQN_MASK(DQN_AGENT):
 
     def __init__(self, state_size, action_size, input_shape, memory_size, replay_start_step):
-        DQN_AGENT.__init__(self, state_size, action_size, memory_size, replay_start_step)
+        DQN_AGENT.__init__(self, state_size, action_size, replay_start_step, memory_size)
 
         self.input_shape = input_shape
         self.__build_model()
