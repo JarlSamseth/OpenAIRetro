@@ -23,12 +23,13 @@ script_dir = os.path.dirname(__file__)  # <-- absolute dir the script is in
 
 class DQN_AGENT:
 
-    def __init__(self, state_size, action_size, memory_size=50000):
+    def __init__(self, state_size, action_size, replay_start_step, memory_size=50000):
         # environment settings
         self.state_size = state_size
         self.action_size = action_size
         self.input_shape = (84, 84, 4)
         self.batch_size = 32
+        self.replay_start_step=replay_start_step
 
         self.learning_rate = 0.001
         self.gamma = 0.99
@@ -82,6 +83,7 @@ class DQN_AGENT:
         absolute_path = script_dir + os.sep + relative_path
         log.info("Loading model from directory=%s" % (absolute_path))
         if os.path.isfile(absolute_path):
+            del self.model
             self.model=load_model(absolute_path, custom_objects={"huber_loss": self.huber_loss})
             self.target_model=self.clone_model()
             self.exploration_rate = 0.1
@@ -99,7 +101,7 @@ class DQN_AGENT:
         log.info("Saving successful")
 
     def train(self, state, target):
-        return self.model.fit(state, target, epochs=1, verbose=0)
+        return self.model.fit(state, target, batch_size=self.batch_size, epochs=1, verbose=0)
 
     def predict(self, state):
         return self.model.predict(state)
@@ -108,8 +110,8 @@ class DQN_AGENT:
         # prepocessed_state = self.preprocess(state)
         self.memory.append((state, action, reward, next_state, done))
 
-    def act(self, state):
-        if (np.random.uniform() < self.exploration_rate):
+    def act(self, state, global_step):
+        if (np.random.uniform() < self.exploration_rate or global_step<=self.replay_start_step):
             return np.random.random_integers(0, self.action_size - 1)
         q_values = self.model.predict([state, np.ones((1, self.action_size))]).astype("int8")
         return np.argmax(q_values)
@@ -124,7 +126,7 @@ class DQN_AGENT:
         next_history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
         action = np.zeros((self.batch_size,), dtype="uint8")
         reward = np.zeros((self.batch_size,), dtype="uint8")
-        done = np.zeros((self.batch_size,), dtype="bool")
+        dead = np.zeros((self.batch_size,), dtype="bool")
 
         sample_batch = self.get_sample_batch()
 
@@ -133,9 +135,9 @@ class DQN_AGENT:
             next_history[i] = sample_batch[i][3]
             action[i] = sample_batch[i][1]
             reward[i] = sample_batch[i][2]
-            done[i] = sample_batch[i][4]
+            dead[i] = sample_batch[i][4]
 
-        return history, next_history, action, reward, done
+        return history, next_history, action, reward, dead
 
     def train_replay(self, iteration):
 
@@ -147,16 +149,19 @@ class DQN_AGENT:
 
         target = np.zeros((self.batch_size, self.action_size))
 
-        history, next_history, action, reward, done = self.train_data()
+        history, next_history, action, reward, dead = self.train_data()
         next_targets = self.target_model.predict([next_history, np.ones((self.batch_size, self.action_size))])
 
         for i in range(self.batch_size):
-            if done[i]:
-                target[i][action[i]] = reward[i]
+            if dead[i]:
+                target[i][action[i]] = -1
             else:
                 target[i][action[i]] = reward[i] + self.gamma * np.amax(next_targets[i])
 
-        result = self.train([history, to_categorical(action, num_classes=self.action_size)], target)
+        action_one_hot=to_categorical(action, num_classes=self.action_size)
+        target_one_hot=action_one_hot*target[:, None]
+
+        result = self.train([history, action_one_hot], target_one_hot)
         loss = result.history["loss"][0]
         self.avg_loss += loss
 

@@ -3,7 +3,7 @@ import time
 import traceback
 
 import numpy as np
-
+import tensorflow as tf
 from models import INPUT_SHAPE, DQN_MASK
 
 script_dir = os.path.dirname(__file__)  # <-- absolute dir the script is in
@@ -14,18 +14,20 @@ from TfSummary import TfSummary
 MODEL_SAVE_DIR = "models"
 import argparse
 
+import sys
 
 def main(args):
+
     episodes = 50000
     checkpoint = 500
-    replay_start_size = 50000
+    replay_start_step = 50000
 
     env = gym.make('BreakoutDeterministic-v4')
     model_name = env.spec._env_name + ".h5"
     state_size = env.observation_space.shape
     action_size = env.action_space.n
 
-    agent = DQN_MASK(state_size, action_size, INPUT_SHAPE, int(args.memory_size))
+    agent = DQN_MASK(state_size, action_size, INPUT_SHAPE, int(args.memory_size), replay_start_step)
 
     if (args.load_model is not False):
         agent.load_model(args.load_model)
@@ -48,21 +50,27 @@ def main(args):
             step = 0
 
             state, stacked_frames = agent.stack_frames(stacked_frames, state, True)
+            start_life = 5
+            dead = False
             while not done:
-                action = agent.act(state)
+                action = agent.act(state, global_step)
                 next_state, reward, done, info = env.step(action)
 
                 if (args.render):
                     env.render()
 
-                # clipped_reward = np.clip(reward, -1., 1.)
-                # if (info["ale.lives"] < lives):
-                #     lives = info["ale.lives"]
-                #     reward = -1
-                
+                if start_life > info['ale.lives']:
+                    dead = True
+                start_life = info['ale.lives']
+
                 next_state, stacked_frames = agent.stack_frames(stacked_frames, next_state, False)
-                agent.remember(state, action, reward, next_state, done)
-                state = next_state
+                agent.remember(state, action, reward, next_state, dead)
+                # If agent is dead, set the flag back to false, but keep the history unchanged,
+                # to avoid to see the ball up in the sky
+                if dead:
+                    dead = False
+                else:
+                    state = next_state
 
                 tot_reward += reward
                 step += 1
@@ -70,11 +78,11 @@ def main(args):
                 agent.avg_q_max += np.amax(
                     agent.model.predict([state, np.ones((agent.batch_size, agent.action_size))]))
 
-                if (global_step > replay_start_size):
+                if (global_step > replay_start_step):
                     agent.train_replay(global_step)
             end = time.time()
 
-            if (global_step > replay_start_size):
+            if (global_step > replay_start_step):
                 summary.add_to_summary({"Total_Reward/Episode": tot_reward,
                                         "Average_Max_Q/Episode": agent.avg_q_max / float(step),
                                         "Steps/Episode": step,
@@ -82,8 +90,8 @@ def main(args):
                                         "Avg_duration_seconds/Episode": end - start}, episode)
 
             print(
-                "episode: %s score: %.2f memory length: %.0f/%.0f epsilon: %.3f global_step:%.0f average_q:%.2f average loss:%.5f time: %.2f"
-                % (episode, tot_reward, len(agent.memory), agent.memory.maxlen, agent.exploration_rate, global_step,
+                "state: %s episode: %s score: %.2f memory length: %.0f/%.0f epsilon: %.3f global_step:%.0f average_q:%.2f average loss:%.5f time: %.2f"
+                % (getState(agent, global_step, replay_start_step), episode, tot_reward, len(agent.memory), agent.memory.maxlen, agent.exploration_rate, global_step,
                    agent.avg_q_max / float(step), agent.avg_loss / float(step), end - start))
 
             if (episode % checkpoint == 0 and episode is not 0):
@@ -98,6 +106,15 @@ def main(args):
         traceback.print_exc()
 
 
+def getState(agent, global_step, replay_start_step):
+    if global_step <= replay_start_step:
+        return "observing"
+    elif global_step <= replay_start_step + agent.final_exploration_frame:
+        return "exploring"
+    else:
+        return "training"
+
+
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
         return True
@@ -105,6 +122,7 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process some integers.')
@@ -114,4 +132,5 @@ if __name__ == '__main__':
                         help='Render the game')
     parser.add_argument('--memory_size', default=50000,
                         help='Maximum memory size')
-    main(parser.parse_args())
+    args=parser.parse_args()
+    tf.app.run(argv=args)

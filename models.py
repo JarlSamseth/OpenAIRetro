@@ -1,10 +1,10 @@
 from collections import deque
 
 import numpy as np
-from keras.layers import Conv2D, Flatten
+from keras.layers import Conv2D, Flatten, Multiply
 from keras.layers import Input, Dense, Lambda, merge
 from keras.models import Model, Sequential
-from keras.optimizers import Adam
+from keras.optimizers import Adam, RMSprop
 
 from dqn_agent import DQN_AGENT
 
@@ -36,8 +36,8 @@ class DQN(DQN_AGENT):
 
 class DQN_MASK(DQN_AGENT):
 
-    def __init__(self, state_size, action_size, input_shape, memory_size):
-        DQN_AGENT.__init__(self, state_size, action_size, memory_size)
+    def __init__(self, state_size, action_size, input_shape, memory_size, replay_start_step):
+        DQN_AGENT.__init__(self, state_size, action_size, memory_size, replay_start_step)
 
         self.input_shape = input_shape
         self.__build_model()
@@ -46,14 +46,16 @@ class DQN_MASK(DQN_AGENT):
         input = Input(shape=self.input_shape, name='frames')
         actions_input = Input((self.action_size,), name='mask')
         normalized = Lambda(lambda x: x / 255.0)(input)
-        x = Conv2D(16, 8, 8, subsample=(4, 4), activation='relu')(normalized)
-        x = Conv2D(32, 4, 4, subsample=(2, 2), activation='relu')(x)
-        x = Flatten()(x)
-        x = Dense(units=256, activation='relu')(x)
-        output = Dense(output_dim=self.action_size, activation='linear')(x)
-        filtered_output = merge([output, actions_input], mode='mul')
+        conv_1 = Conv2D(16, (8, 8), strides=(4, 4), activation='relu')(normalized)
+        conv_2 = Conv2D(32, (4, 4), strides=(2, 2), activation='relu')(conv_1)
+        conv_flattened = Flatten()(conv_2)
+        hidden = Dense(units=256, activation='relu')(conv_flattened)
+        output = Dense(output_dim=self.action_size, activation='linear')(hidden)
+        filtered_output = Multiply(name="Qvalue")([output, actions_input])
         self.model = Model(input=[input, actions_input], output=filtered_output)
-        optimizer = Adam()
+        optimizer = RMSprop(
+            lr=0.00025, rho=0.95, epsilon=0.01
+        )
         self.model.compile(optimizer=optimizer, loss=self.huber_loss)
         self.target_model = self.clone_model()
         print(self.model.summary())
