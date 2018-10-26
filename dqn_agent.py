@@ -37,7 +37,7 @@ class DQNAgent:
         self.exploration_rate = self.exploration_rate_max
 
         self.exploration_decay = 1. - 1 / 100000
-        self.final_exploration_frame = 300
+        self.final_exploration_frame = 1000000
         self.memory = deque(maxlen=memory_size)
         self.n_stacked_frames = 4
 

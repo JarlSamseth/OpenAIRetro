@@ -30,7 +30,7 @@ def train(args):
 
     episodes = 50000
     checkpoint = 500
-    replay_start_step = 200
+    replay_start_step = 50000
 
     summary = TfSummary("breakout_dqn",
                         ["Score/Episode", "Average_MaxQ/Episode", "Steps/Episode", "Average_Loss/Episode"])
