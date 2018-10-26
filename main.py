@@ -1,81 +1,76 @@
+import argparse
 import os
 import time
 import traceback
 
-import numpy as np
+import gym
 import tensorflow as tf
-from skimage.color import rgb2gray
-from skimage.transform import resize
 
-from models import INPUT_SHAPE, DQN_MASK
+from TfSummary import TfSummary
+from models import DQNMask
+from enum import Enum
 
 script_dir = os.path.dirname(__file__)  # <-- absolute dir the script is in
-import gym
-from TfSummary import TfSummary
 
 MODEL_SAVE_DIR = "models"
-import argparse
+INPUT_SHAPE = (84, 84, 4)
 
-from keras import backend as K
 
-def main(args):
-    parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument('--load_model', default=False,
-                        help='Set this to true if you want to load an saved model')
-    parser.add_argument('--render', type=str2bool, nargs="?", const=True, default=False,
-                        help='Render the game')
-    parser.add_argument('--memory_size', default=50000,
-                        help='Maximum memory size')
-    args = parser.parse_args()
+class STATUS(Enum):
+    OBSERVING = 1
+    EXPLORING = 2
+    TRAINING = 3
 
-    episodes = 50000
-    checkpoint = 500
-    replay_start_step = 50000
 
+def train(args):
     env = gym.make('BreakoutDeterministic-v4')
     model_name = env.spec._env_name + ".h5"
     state_size = env.observation_space.shape
     action_size = env.action_space.n
 
+    episodes = 50000
+    checkpoint = 500
+    replay_start_step = 200
+
     summary = TfSummary("breakout_dqn",
-                        ["Total_Reward/Episode", "Average_Max_Q/Episode", "Steps/Episode", "Average_Loss/Episode",
-                         "Avg_duration_seconds/Episode"])
+                        ["Score/Episode", "Average_MaxQ/Episode", "Steps/Episode", "Average_Loss/Episode"])
 
-    agent = DQN_MASK(state_size, action_size, INPUT_SHAPE, int(args.memory_size), replay_start_step)
-
-    if (args.load_model is not False):
-        agent.load_model(args.load_model)
+    agent = DQNMask(state_size, action_size, INPUT_SHAPE, int(args.memory_size), replay_start_step, args.load_model)
 
     try:
+
         global_step = 0
+
         for episode in range(episodes):
             done = False
-            tot_reward = 0
             dead = False
 
+            score = 0
+            step = 0
             start_life = 5
 
-            state = env.reset()
-            observe, _, _, _ = env.step(1)
-
             start = time.time()
-            step = 0
 
-            state, stacked_frames = agent.stack_frames(None, observe, True)
+            env.reset()
+            observation, _, _, _ = env.step(1)
+
+            state, stacked_observations = agent.stack_observations(None, observation, is_new_episode=True)
             while not done:
 
-                if (args.render):
+                if args.render:
                     env.render()
 
                 action = agent.act(state, global_step)
-                observe, reward, done, info = env.step(action)
+                observation, reward, done, info = env.step(action)
 
-                if start_life > info['ale.lives']:
-                    dead = True
-                    start_life = info['ale.lives']
+                # if start_life > info['ale.lives']:
+                #     dead = True
+                #     start_life = info['ale.lives']
 
-                next_state, stacked_frames = agent.stack_frames(stacked_frames, observe, False)
-                agent.remember(state, action, reward, next_state, dead)
+                next_state, stacked_observations = agent.stack_observations(stacked_observations, observation,
+                                                                            is_new_episode=False)
+                agent.remember(state, action, reward, next_state, done)
+
                 # If agent is dead, set the flag back to false, but keep the history unchanged,
                 # to avoid to see the ball up in the sky
                 # if dead:
@@ -84,33 +79,37 @@ def main(args):
                 #     state = next_state
                 state = next_state
 
-                tot_reward += reward
+                score += reward
                 step += 1
                 global_step += 1
-                agent.avg_q_max += np.amax(
-                    agent.model.predict([state, np.ones((agent.batch_size, agent.action_size))]))
 
-                if (global_step > replay_start_step):
+                agent.update_sum_qmax(state)
+
+                if getStatus(agent, global_step, replay_start_step) != STATUS.OBSERVING:
                     agent.train_replay(global_step)
 
-            end = time.time()
+                if done:
+                    end = time.time()
 
-            if (global_step > replay_start_step):
-                summary.add_to_summary({"Total_Reward/Episode": tot_reward,
-                                        "Average_Max_Q/Episode": agent.avg_q_max / float(step),
-                                        "Steps/Episode": step,
-                                        "Average_Loss/Episode": agent.avg_loss / float(step),
-                                        "Avg_duration_seconds/Episode": end - start}, episode)
+                    print(
+                        "state: %s episode: %s score: %.2f memory length: %.0f/%.0f epsilon: %.3f global_step:%.0f "
+                        "average_q:%.2f average loss:%.5f time: %.2f "
+                        % (
+                            getStatus(agent, global_step, replay_start_step).name, episode, score, len(agent.memory),
+                            agent.memory.maxlen,
+                            agent.exploration_rate, global_step,
+                            agent.sum_q_max / float(step), agent.sum_loss / float(step), end - start))
 
-            print(
-                "state: %s episode: %s score: %.2f memory length: %.0f/%.0f epsilon: %.3f global_step:%.0f average_q:%.2f average loss:%.5f time: %.2f"
-                % (getState(agent, global_step, replay_start_step), episode, tot_reward, len(agent.memory), agent.memory.maxlen, agent.exploration_rate, global_step,
-                   agent.avg_q_max / float(step), agent.avg_loss / float(step), end - start))
+                    if global_step > replay_start_step:
+                        summary.add_to_summary({"Score/Episode": score,
+                                                "Average_MaxQ/Episode": agent.sum_q_max / float(step),
+                                                "Steps/Episode": step,
+                                                "Average_Loss/Episode": agent.sum_loss / float(step)}, episode)
 
-            if (episode % checkpoint == 0 and episode is not 0):
-                agent.save_model(MODEL_SAVE_DIR, model_name)
+                    if episode % checkpoint == 0 and episode is not 0:
+                        agent.save_model(MODEL_SAVE_DIR, model_name)
 
-            agent.avg_q_max, agent.avg_loss = 0, 0
+            agent.sum_q_max, agent.sum_loss = 0.0, 0.0
 
         agent.save_model(MODEL_SAVE_DIR, model_name)
 
@@ -119,13 +118,13 @@ def main(args):
         traceback.print_exc()
 
 
-def getState(agent, global_step, replay_start_step):
+def getStatus(agent, global_step, replay_start_step):
     if global_step <= replay_start_step:
-        return "observing"
-    elif global_step <= replay_start_step + agent.final_exploration_frame:
-        return "exploring"
+        return STATUS.OBSERVING
+    elif global_step <= (replay_start_step + agent.final_exploration_frame):
+        return STATUS.EXPLORING
     else:
-        return "training"
+        return STATUS.TRAINING
 
 
 def str2bool(v):
@@ -137,51 +136,19 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def pre_processing(observe):
-    processed_observe = np.uint8(
-        resize(rgb2gray(observe), (84, 84), mode='constant') * 255)
-    return processed_observe
-
-
-def huber_loss(a, b, in_keras=True):
-    error = a - b
-    quadratic_term = error * error / 2
-    linear_term = abs(error) - 1 / 2
-    use_linear_term = (abs(error) > 1.0)
-    if in_keras:
-        # Keras won't let us multiply floats by booleans, so we explicitly cast the booleans to floats
-        use_linear_term = K.cast(use_linear_term, 'float32')
-    return use_linear_term * linear_term + (1 - use_linear_term) * quadratic_term
-
-
-def get_action(history, epsilon, step, model):
-    q_value = model.predict([history, np.ones(3).reshape(1, 3)])
-    return np.argmax(q_value[0])
-
-
-def test():
-    parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument('--load_model', default=False,
-                        help='Set this to true if you want to load an saved model')
-    parser.add_argument('--render', type=str2bool, nargs="?", const=True, default=False,
-                        help='Render the game')
-    parser.add_argument('--memory_size', default=50000,
-                        help='Maximum memory size')
-    args = parser.parse_args()
-
+def test(args):
+    print("Testing model: " + args.load_model)
     replay_start_step = 1
 
     env = gym.make('BreakoutDeterministic-v4')
     state_size = env.observation_space.shape
     action_size = env.action_space.n
 
-    agent = DQN_MASK(state_size, action_size, INPUT_SHAPE, int(args.memory_size), replay_start_step)
+    agent = DQNMask(state_size, action_size, INPUT_SHAPE, int(args.memory_size), replay_start_step, args.load_model)
 
     episode_number = 0
-    epsilon = 0.001
-    global_step = 1000 + 1
+    global_step = 0
 
-    agent.load_model("models/breakout_model.h5")
     # test how to deep copy a model
     '''
     model_copy = clone_model(model)    # only copy the structure, not the value of the weights
@@ -198,16 +165,15 @@ def test():
 
         observe, _, _, _ = env.step(1)
 
-        state, stacked_frames = agent.stack_frames(None, observe, True)
+        state, stacked_frames = agent.stack_observations(None, observe, True)
         while not done:
             env.render()
             time.sleep(0.01)
             # get action for the current history and go one step in environment
             action = agent.act(state, global_step)
-            print("action: " + str(action + 1))
-            observe, reward, done, info = env.step(action + 1)
+            observe, reward, done, info = env.step(action)
 
-            next_state, stacked_frames = agent.stack_frames(stacked_frames, observe, False)
+            next_state, stacked_frames = agent.stack_observations(stacked_frames, observe, False)
 
             # if the agent missed ball, agent is dead --> episode is not over
             if start_life > info['ale.lives']:
@@ -229,6 +195,24 @@ def test():
             if done:
                 episode_number += 1
                 print('episode: {}, score: {}'.format(episode_number, score))
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('--load_model', default=False,
+                        help='Set this to true if you want to load an saved model')
+    parser.add_argument('--render', type=str2bool, nargs="?", const=True, default=False,
+                        help='Render the game')
+    parser.add_argument('--memory_size', default=50000,
+                        help='Maximum memory size')
+    parser.add_argument('--test', type=str2bool, nargs="?", const=True, default=False,
+                        help='Only test a preloaded model')
+    args = parser.parse_args()
+
+    if args.test:
+        test(args)
+    else:
+        train(args)
 
 
 if __name__ == '__main__':

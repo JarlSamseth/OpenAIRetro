@@ -4,6 +4,7 @@ from keras import backend as K
 
 class TfSummary:
     def __init__(self, dir_name, summary_names) -> None:
+        K.clear_session()
         self.sess = K.get_session()
 
 

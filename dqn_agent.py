@@ -9,20 +9,15 @@ from PIL import Image
 from keras import backend as K
 from keras.models import clone_model, load_model
 from keras.utils import to_categorical
-from skimage.color import rgb2gray
-from skimage.transform import resize
 
 log.basicConfig(level=log.INFO)
 
-MODEL_NAME = "breakout"
-WEIGHT_BACKUP_NAME = MODEL_NAME + ".h5"
-BACKUP_FOLDER_NAME = "sonic_genesis_act1_weights_2018-06-09 15_08_24.280086"
 INPUT_SHAPE = (84, 84, 4)
 
 script_dir = os.path.dirname(__file__)  # <-- absolute dir the script is in
 
 
-class DQN_AGENT:
+class DQNAgent:
 
     def __init__(self, state_size, action_size, replay_start_step, memory_size=50000):
         # environment settings
@@ -35,14 +30,14 @@ class DQN_AGENT:
         self.learning_rate = 0.001
         self.gamma = 0.99
 
-        self.avg_q_max, self.avg_loss = 0, 0
+        self.sum_q_max, self.sum_loss = 0, 0
 
         # parameters about epsilon
         self.exploration_rate_max, self.exploration_min = 1.0, 0.1
         self.exploration_rate = self.exploration_rate_max
 
         self.exploration_decay = 1. - 1 / 100000
-        self.final_exploration_frame = 1000000
+        self.final_exploration_frame = 300
         self.memory = deque(maxlen=memory_size)
         self.n_stacked_frames = 4
 
@@ -56,6 +51,7 @@ class DQN_AGENT:
         return None
 
     def clone_model(self):
+        print("cloning model")
         """Returns a copy of a keras model."""
         temp_model = clone_model(self.model)
         temp_model.set_weights(self.model.get_weights())
@@ -71,11 +67,6 @@ class DQN_AGENT:
             use_linear_term = K.cast(use_linear_term, 'float32')
         return use_linear_term * linear_term + (1 - use_linear_term) * quadratic_term
 
-    def preprocess_v2(self, observation):
-        processed_observe = np.uint8(
-            resize(rgb2gray(observation), (84, 84), mode='constant') * 255)
-        return self.reshape_state(processed_observe)
-
     def preprocess(self, observation):
         assert observation.ndim == 3  # (height, width, channel)
         img = Image.fromarray(observation)
@@ -89,21 +80,24 @@ class DQN_AGENT:
         absolute_path = script_dir + os.sep + relative_path
         log.info("Loading model from directory=%s" % (absolute_path))
         if os.path.isfile(absolute_path):
-            del self.model
             self.model=load_model(absolute_path, custom_objects={"huber_loss": self.huber_loss})
             self.target_model=self.clone_model()
-            self.exploration_rate = 0.001
+            # Assuming that the models is done with exploring
+            self.exploration_rate = self.exploration_min
             self.final_exploration_frame = 1
             log.info("Loading successful")
         else:
             log.warning("Could not find model on path=" + absolute_path + ". Continuing without loading existing model")
 
     def save_model(self, directory, model_name):
-        log.info("Saving model")
-        absolute_path = script_dir + os.sep + directory
-        if (not os.path.isdir(absolute_path)):
-            os.mkdir(absolute_path, 0o777)
-        self.model.save(absolute_path + os.sep + model_name)
+        dir_path = script_dir + os.sep + directory
+        absolute_path=dir_path+os.sep+model_name
+        log.info("Saving model to path {}".format(absolute_path))
+
+        if not os.path.isdir(dir_path):
+            os.mkdir(dir_path, 0o777)
+
+        self.model.save(absolute_path)
         log.info("Saving successful")
 
     def train(self, state, target):
@@ -111,6 +105,10 @@ class DQN_AGENT:
 
     def predict(self, state):
         return self.model.predict(state)
+
+    def update_sum_qmax(self, state):
+        self.sum_q_max += np.amax(
+            self.model.predict([state, np.ones((self.batch_size, self.action_size))]))
 
     def remember(self, state, action, reward, next_state, done):
         # prepocessed_state = self.preprocess(state)
@@ -132,7 +130,7 @@ class DQN_AGENT:
         next_history = np.zeros(((self.batch_size,) + INPUT_SHAPE))
         action = np.zeros((self.batch_size,), dtype="uint8")
         reward = np.zeros((self.batch_size,), dtype="uint8")
-        dead = np.zeros((self.batch_size,), dtype="bool")
+        done = np.zeros((self.batch_size,), dtype="bool")
 
         sample_batch = self.get_sample_batch()
 
@@ -141,25 +139,25 @@ class DQN_AGENT:
             next_history[i] = sample_batch[i][3]
             action[i] = sample_batch[i][1]
             reward[i] = sample_batch[i][2]
-            dead[i] = sample_batch[i][4]
+            done[i] = sample_batch[i][4]
 
-        return history, next_history, action, reward, dead
+        return history, next_history, action, reward, done
 
     def train_replay(self, iteration):
 
         if len(self.memory) < self.batch_size:
             return
 
-        if (iteration % self.target_model_update_iteration is 0):
+        if iteration % self.target_model_update_iteration is 0:
             self.target_model = self.clone_model()
 
         target = np.zeros((self.batch_size, self.action_size))
 
-        history, next_history, action, reward, dead = self.train_data()
+        history, next_history, action, reward, done = self.train_data()
         next_targets = self.target_model.predict([next_history, np.ones((self.batch_size, self.action_size))])
 
         for i in range(self.batch_size):
-            if dead[i]:
+            if done[i]:
                 target[i][action[i]] = reward[i]
             else:
                 target[i][action[i]] = reward[i] + self.gamma * np.amax(next_targets[i])
@@ -169,7 +167,7 @@ class DQN_AGENT:
 
         result = self.train([history, action_one_hot], target_one_hot)
         loss = result.history["loss"][0]
-        self.avg_loss += loss
+        self.sum_loss += loss
 
         self.update_epsilon(iteration)
 
@@ -179,25 +177,25 @@ class DQN_AGENT:
     def reshape_state(self, state):
         return np.reshape(state, (1,) + state.shape)
 
-    def stack_frames(self, stacked_frames, state, is_new_episode):
-        # Preprocess frame
-        frame = self.preprocess(state)
+    def stack_observations(self, stacked_frames, observation, is_new_episode):
+        preprocessed_frame = self.preprocess(observation)
+
         if is_new_episode:
             # Clear our stacked_frames
             stacked_frames = deque(maxlen=4)
 
             # Because we're in a new episode, copy the same frame 4x
-            stacked_frames.appendleft(frame)
-            stacked_frames.appendleft(frame)
-            stacked_frames.appendleft(frame)
-            stacked_frames.appendleft(frame)
+            stacked_frames.append(preprocessed_frame)
+            stacked_frames.append(preprocessed_frame)
+            stacked_frames.append(preprocessed_frame)
+            stacked_frames.append(preprocessed_frame)
 
             # Stack the frames
             stacked_state = np.stack(stacked_frames, axis=3)
 
         else:
             # Append frame to deque, automatically removes the oldest frame
-            stacked_frames.appendleft(frame)
+            stacked_frames.append(preprocessed_frame)
 
             # Build the stacked state (first dimension specifies different frames)
             stacked_state = np.stack(stacked_frames, axis=3)
