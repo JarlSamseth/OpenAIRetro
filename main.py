@@ -2,13 +2,13 @@ import argparse
 import os
 import time
 import traceback
+from enum import Enum
 
 import gym
 import tensorflow as tf
 
 from TfSummary import TfSummary
 from models import DQNMask
-from enum import Enum
 
 script_dir = os.path.dirname(__file__)  # <-- absolute dir the script is in
 
@@ -63,21 +63,20 @@ def train(args):
                 action = agent.act(state, global_step)
                 observation, reward, done, info = env.step(action)
 
-                # if start_life > info['ale.lives']:
-                #     dead = True
-                #     start_life = info['ale.lives']
+                if start_life > info['ale.lives']:
+                    dead = True
+                    start_life = info['ale.lives']
 
                 next_state, stacked_observations = agent.stack_observations(stacked_observations, observation,
                                                                             is_new_episode=False)
-                agent.remember(state, action, reward, next_state, done)
+                agent.remember(state, action, reward, next_state, dead)
 
                 # If agent is dead, set the flag back to false, but keep the history unchanged,
                 # to avoid to see the ball up in the sky
-                # if dead:
-                #     dead = False
-                # else:
-                #     state = next_state
-                state = next_state
+                if dead:
+                    dead = False
+                else:
+                    state = next_state
 
                 score += reward
                 step += 1
