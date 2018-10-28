@@ -1,0 +1,6 @@
+gym==0.9.7
+tensorflow==1.2.1
+tensorflow-gpu==1.7.0
+numpy==1.14.2
+keras==2.1.5
+Pillow==5.1.0
