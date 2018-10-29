@@ -80,7 +80,8 @@ class DQNAgent:
         absolute_path = script_dir + os.sep + relative_path
         log.info("Loading model from directory=%s" % (absolute_path))
         if os.path.isfile(absolute_path):
-            self.model=load_model(absolute_path, custom_objects={"huber_loss": self.huber_loss})
+            #self.model=load_model(absolute_path, custom_objects={"huber_loss": self.huber_loss})
+            self.model.load_weights(absolute_path)
             self.target_model=self.clone_model()
             # Assuming that the models is done with exploring
             self.exploration_rate = self.exploration_min
