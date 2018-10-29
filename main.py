@@ -5,6 +5,7 @@ import traceback
 from enum import Enum
 
 import gym
+import imageio as imageio
 import tensorflow as tf
 
 from TfSummary import TfSummary
@@ -163,7 +164,7 @@ def test(args):
         observe = env.reset()
 
         observe, _, _, _ = env.step(1)
-
+        frames = []
         state, stacked_frames = agent.stack_observations(None, observe, True)
         while not done:
             env.render()
@@ -171,7 +172,7 @@ def test(args):
             # get action for the current history and go one step in environment
             action = agent.act(state, global_step)
             observe, reward, done, info = env.step(action)
-
+            frames.append(observe)
             next_state, stacked_frames = agent.stack_observations(stacked_frames, observe, False)
 
             # if the agent missed ball, agent is dead --> episode is not over
@@ -192,9 +193,18 @@ def test(args):
             global_step += 1
 
             if done:
+                generate_gif(frames, score)
                 episode_number += 1
                 print('episode: {}, score: {}'.format(episode_number, score))
 
+
+def generate_gif(frames_for_gif, reward):
+    from skimage.transform import resize
+    for i in range(frames_for_gif.__len__()):
+        frames_for_gif[i] = resize(frames_for_gif[i], (
+        frames_for_gif[i].shape[0] / 2, frames_for_gif[i].shape[1] / 2, frames_for_gif[i].shape[2]))
+    imageio.mimsave("breakout_reward_{}.gif".format(reward),
+                    frames_for_gif, duration=1 / 30)
 
 def main(argv):
     parser = argparse.ArgumentParser(description='Process some integers.')
