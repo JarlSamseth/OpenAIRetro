@@ -178,7 +178,7 @@ class DQNAgent:
     def reshape_state(self, state):
         return np.reshape(state, (1,) + state.shape)
 
-    def stack_observations(self, stacked_frames, observation, is_new_episode):
+    def stack_frames(self, stacked_frames, observation, is_new_episode):
         preprocessed_frame = self.preprocess(observation)
 
         if is_new_episode:

@@ -55,7 +55,7 @@ def train(args):
             env.reset()
             observation, _, _, _ = env.step(1)
 
-            state, stacked_observations = agent.stack_observations(None, observation, is_new_episode=True)
+            state, stacked_observations = agent.stack_frames(None, observation, is_new_episode=True)
             while not done:
 
                 if args.render:
@@ -68,8 +68,8 @@ def train(args):
                     dead = True
                     start_life = info['ale.lives']
 
-                next_state, stacked_observations = agent.stack_observations(stacked_observations, observation,
-                                                                            is_new_episode=False)
+                next_state, stacked_observations = agent.stack_frames(stacked_observations, observation,
+                                                                      is_new_episode=False)
                 agent.remember(state, action, reward, next_state, dead)
 
                 # If agent is dead, set the flag back to false, but keep the history unchanged,
@@ -161,19 +161,19 @@ def test(args):
         dead = False
         # 1 episode = 5 lives
         score, start_life = 0, 5
-        observe = env.reset()
+        frame = env.reset()
 
-        observe, _, _, _ = env.step(1)
+        frame, _, _, _ = env.step(1)
         frames = []
-        state, stacked_frames = agent.stack_observations(None, observe, True)
+        state, stacked_frames = agent.stack_frames(None, frame, True)
         while not done:
             env.render()
             time.sleep(0.01)
             # get action for the current history and go one step in environment
             action = agent.act(state, global_step)
-            observe, reward, done, info = env.step(action)
-            frames.append(observe)
-            next_state, stacked_frames = agent.stack_observations(stacked_frames, observe, False)
+            frame, reward, done, info = env.step(action)
+            frames.append(frame)
+            next_state, stacked_frames = agent.stack_frames(stacked_frames, frame, False)
 
             # if the agent missed ball, agent is dead --> episode is not over
             if start_life > info['ale.lives']:
@@ -202,7 +202,7 @@ def generate_gif(frames_for_gif, reward):
     from skimage.transform import resize
     for i in range(frames_for_gif.__len__()):
         frames_for_gif[i] = resize(frames_for_gif[i], (
-        frames_for_gif[i].shape[0] / 2, frames_for_gif[i].shape[1] / 2, frames_for_gif[i].shape[2]))
+        frames_for_gif[i].shape[0] * 2, frames_for_gif[i].shape[1] * 2, frames_for_gif[i].shape[2]))
     imageio.mimsave("breakout_reward_{}.gif".format(reward),
                     frames_for_gif, duration=1 / 30)
 
