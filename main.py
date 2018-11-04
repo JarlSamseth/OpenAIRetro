@@ -9,6 +9,7 @@ import imageio as imageio
 import tensorflow as tf
 
 from TfSummary import TfSummary
+from dqn_agent import stack_frames
 from models import DQNMask
 
 script_dir = os.path.dirname(__file__)  # <-- absolute dir the script is in
@@ -53,23 +54,24 @@ def train(args):
             start = time.time()
 
             env.reset()
-            observation, _, _, _ = env.step(1)
+            frame, _, _, _ = env.step(1)
 
-            state, stacked_observations = agent.stack_frames(None, observation, is_new_episode=True)
+            preprocessed_frame = agent.preprocess(frame)
+            state, stacked_frames = stack_frames(None, preprocessed_frame, is_new_episode=True)
             while not done:
 
                 if args.render:
                     env.render()
 
                 action = agent.act(state, global_step)
-                observation, reward, done, info = env.step(action)
+                frame, reward, done, info = env.step(action)
 
                 if start_life > info['ale.lives']:
                     dead = True
                     start_life = info['ale.lives']
 
-                next_state, stacked_observations = agent.stack_frames(stacked_observations, observation,
-                                                                      is_new_episode=False)
+                preprocessed_frame = agent.preprocess(frame)
+                next_state, stacked_frames = stack_frames(stacked_frames, preprocessed_frame, is_new_episode=False)
                 agent.remember(state, action, reward, next_state, dead)
 
                 # If agent is dead, set the flag back to false, but keep the history unchanged,
@@ -85,7 +87,7 @@ def train(args):
 
                 agent.update_sum_qmax(state)
 
-                if getStatus(agent, global_step, replay_start_step) != STATUS.OBSERVING:
+                if get_status(agent, global_step, replay_start_step) != STATUS.OBSERVING:
                     agent.train_replay(global_step)
 
                 if done:
@@ -95,7 +97,7 @@ def train(args):
                         "state: %s episode: %s score: %.2f memory length: %.0f/%.0f epsilon: %.3f global_step:%.0f "
                         "average_q:%.2f average loss:%.5f time: %.2f "
                         % (
-                            getStatus(agent, global_step, replay_start_step).name, episode, score, len(agent.memory),
+                            get_status(agent, global_step, replay_start_step).name, episode, score, len(agent.memory),
                             agent.memory.maxlen,
                             agent.exploration_rate, global_step,
                             agent.sum_q_max / float(step), agent.sum_loss / float(step), end - start))
@@ -118,24 +120,6 @@ def train(args):
         traceback.print_exc()
 
 
-def getStatus(agent, global_step, replay_start_step):
-    if global_step <= replay_start_step:
-        return STATUS.OBSERVING
-    elif global_step <= (replay_start_step + agent.final_exploration_frame):
-        return STATUS.EXPLORING
-    else:
-        return STATUS.TRAINING
-
-
-def str2bool(v):
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
-
-
 def test(args):
     print("Testing model: " + args.load_model)
     replay_start_step = 1
@@ -149,12 +133,6 @@ def test(args):
     episode_number = 0
     global_step = 0
 
-    # test how to deep copy a model
-    '''
-    model_copy = clone_model(model)    # only copy the structure, not the value of the weights
-    model_copy.set_weights(model.get_weights())
-    '''
-
     while episode_number < 5000:
 
         done = False
@@ -165,15 +143,17 @@ def test(args):
 
         frame, _, _, _ = env.step(1)
         frames = []
-        state, stacked_frames = agent.stack_frames(None, frame, True)
+        preprocessed_frame = agent.preprocess(frame)
+        state, stacked_frames = stack_frames(None, preprocessed_frame, True)
         while not done:
             env.render()
             time.sleep(0.01)
             # get action for the current history and go one step in environment
             action = agent.act(state, global_step)
             frame, reward, done, info = env.step(action)
-            frames.append(frame)
-            next_state, stacked_frames = agent.stack_frames(stacked_frames, frame, False)
+            # frames.append(frame)
+            preprocessed_frame = agent.preprocess(frame)
+            next_state, stacked_frames = stack_frames(stacked_frames, preprocessed_frame, False)
 
             # if the agent missed ball, agent is dead --> episode is not over
             if start_life > info['ale.lives']:
@@ -193,18 +173,37 @@ def test(args):
             global_step += 1
 
             if done:
-                generate_gif(frames, score)
+                #generate_gif(frames, score)
                 episode_number += 1
                 print('episode: {}, score: {}'.format(episode_number, score))
+
+
+def get_status(agent, global_step, replay_start_step):
+    if global_step <= replay_start_step:
+        return STATUS.OBSERVING
+    elif global_step <= (replay_start_step + agent.final_exploration_frame):
+        return STATUS.EXPLORING
+    else:
+        return STATUS.TRAINING
+
+
+def str2bool(v):
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def generate_gif(frames_for_gif, reward):
     from skimage.transform import resize
     for i in range(frames_for_gif.__len__()):
         frames_for_gif[i] = resize(frames_for_gif[i], (
-        frames_for_gif[i].shape[0] * 2, frames_for_gif[i].shape[1] * 2, frames_for_gif[i].shape[2]))
+            frames_for_gif[i].shape[0] * 2, frames_for_gif[i].shape[1] * 2, frames_for_gif[i].shape[2]))
     imageio.mimsave("breakout_reward_{}.gif".format(reward),
                     frames_for_gif, duration=1 / 30)
+
 
 def main(argv):
     parser = argparse.ArgumentParser(description='Process some integers.')

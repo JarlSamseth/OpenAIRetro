@@ -1,9 +1,10 @@
+from keras.initializers import he_normal
 from keras.layers import Conv2D, Flatten, Multiply
 from keras.layers import Input, Dense, Lambda
 from keras.models import Model
 from keras.optimizers import Adam
-from keras.initializers import he_normal
-from dqn_agent import DQNAgent
+
+from dqn_agent import DQNAgent, huber_loss
 
 
 class DQNMask(DQNAgent):
@@ -31,7 +32,7 @@ class DQNMask(DQNAgent):
         filtered_output = Multiply(name="Qvalue")([output, actions_input])
         self.model = Model(input=[input, actions_input], output=filtered_output)
         optimizer = Adam(lr=0.00001)
-        self.model.compile(optimizer=optimizer, loss=self.huber_loss)
+        self.model.compile(optimizer=optimizer, loss=huber_loss)
         self.target_model = self.clone_model()
         print(self.model.summary())
 
@@ -61,6 +62,6 @@ class DQNMaskV2(DQNAgent):
         filtered_output = Multiply(name="Qvalue")([output, actions_input])
         self.model = Model(input=[input, actions_input], output=filtered_output)
         optimizer = Adam(lr=0.00001)
-        self.model.compile(optimizer=optimizer, loss=self.huber_loss)
+        self.model.compile(optimizer=optimizer, loss=huber_loss)
         self.target_model = self.clone_model()
         print(self.model.summary())
