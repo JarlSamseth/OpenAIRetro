@@ -78,8 +78,8 @@ def train(args):
                 # to avoid to see the ball up in the sky
                 if dead:
                     dead = False
-                else:
-                    state = next_state
+
+                state = next_state
 
                 score += reward
                 step += 1
