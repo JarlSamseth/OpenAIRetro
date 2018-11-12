@@ -74,8 +74,6 @@ def train(args):
                 next_state, stacked_frames = stack_frames(stacked_frames, preprocessed_frame, is_new_episode=False)
                 agent.remember(state, action, reward, next_state, dead)
 
-                # If agent is dead, set the flag back to false, but keep the history unchanged,
-                # to avoid to see the ball up in the sky
                 if dead:
                     dead = False
 
