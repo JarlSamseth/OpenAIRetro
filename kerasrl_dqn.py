@@ -14,11 +14,62 @@ from rl.agents.dqn import DQNAgent
 from rl.policy import LinearAnnealedPolicy, BoltzmannQPolicy, EpsGreedyQPolicy
 from rl.memory import SequentialMemory
 from rl.core import Processor
-from rl.callbacks import FileLogger, ModelIntervalCheckpoint
-
+from rl.callbacks import FileLogger, ModelIntervalCheckpoint, Callback
+import tensorflow as tf
+from keras import backend as K
 
 INPUT_SHAPE = (84, 84)
 WINDOW_LENGTH = 4
+
+
+def str2bool(v):
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+class TensorboardCallback(Callback):
+
+    def __init__(self, dir_name):
+        super(TensorboardCallback, self).__init__()
+        summary_names = ["Reward/Episode", "Steps/Episode"]
+        self.sess = K.get_session()
+
+        self.summary_placeholders, self.update_ops, self.summary_op = \
+            self.__setup_summary(summary_names)
+        self.summary_writer = tf.summary.FileWriter(
+            'summary/' + dir_name, self.sess.graph)
+
+    def on_episode_end(self, episode, logs={}):
+        self.add_to_summary({"Reward/Episode": logs["episode_reward"],
+                             "Steps/Episode": logs["nb_episode_steps"]}, episode)
+
+    def __setup_summary(self, summary_names):
+
+        summary_placeholders = {}
+        update_ops = {}
+        for name in summary_names:
+            summary_var = tf.Variable(0., name=name)
+            tf.summary.scalar(name, summary_var)
+
+            summary_placeholder = tf.placeholder(tf.float32, name=name)
+            summary_placeholders[name] = summary_placeholder
+
+            update_ops[name] = summary_var.assign(summary_placeholder)
+
+        summary_op = tf.summary.merge_all()
+        return summary_placeholders, update_ops, summary_op
+
+    def add_to_summary(self, stats, episode):
+        for stat_name in stats:
+            self.sess.run(self.update_ops[stat_name], feed_dict={
+                self.summary_placeholders[stat_name]: float(stats[stat_name])
+            })
+        summary_str = self.sess.run(self.summary_op)
+        self.summary_writer.add_summary(summary_str, episode + 1)
 
 
 class AtariProcessor(Processor):
@@ -40,10 +91,14 @@ class AtariProcessor(Processor):
     def process_reward(self, reward):
         return np.clip(reward, -1., 1.)
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode', choices=['train', 'test'], default='train')
 parser.add_argument('--env-name', type=str, default='BreakoutDeterministic-v4')
 parser.add_argument('--weights', type=str, default=None)
+parser.add_argument('--render', type=str2bool, nargs="?", const=True, default=False,
+                    help='Render the game')
+
 args = parser.parse_args()
 
 # Get the environment and extract the number of actions.
@@ -108,7 +163,8 @@ if args.mode == 'train':
     log_filename = 'dqn_{}_log.json'.format(args.env_name)
     callbacks = [ModelIntervalCheckpoint(checkpoint_weights_filename, interval=250000)]
     callbacks += [FileLogger(log_filename, interval=100)]
-    dqn.fit(env, callbacks=callbacks, visualize=True, verbose=0, nb_steps=1750000, log_interval=10000)
+    callbacks += [TensorboardCallback("keras_rl_breakout_dqn")]
+    dqn.fit(env, callbacks=callbacks, visualize=args.render, verbose=2, nb_steps=1750000, log_interval=10000)
 
     # After training is done, we save the final weights one more time.
     dqn.save_weights(weights_filename, overwrite=True)
